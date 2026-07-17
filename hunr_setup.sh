@@ -167,9 +167,11 @@ step_server() {
     rm -rf /tmp/HUNR_Server.zip /tmp/hunr_extract/ 2>/dev/null || true
   fi
 
-  # ── Tạo static/lists.txt ──────────────────────────────────────
-  echo "Local:127.0.0.1:${GAME_PORT}:0,0,0" > "$STATIC_DIR/lists.txt"
-  ok "lists.txt: Local:127.0.0.1:${GAME_PORT}:0,0,0"
+  # ── Tạo static/lists.txt + server.txt (serve cả hai để APK Mod nào cũng khớp)
+  local ADDR="Local:127.0.0.1:${GAME_PORT}:0,0,0"
+  echo "$ADDR" > "$STATIC_DIR/lists.txt"
+  echo "$ADDR" > "$STATIC_DIR/server.txt"
+  ok "lists.txt + server.txt: $ADDR"
 
   # ── Tạo application.properties ───────────────────────────────
   cat > "$HUNR_HOME/application.properties" << APPEOF
