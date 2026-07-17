@@ -58,15 +58,21 @@ check_deps() {
 }
 
 # ─── Tải HUNR_Server.zip từ Google Drive ─────────────────────
+# Chỉ extract files cần thiết (bỏ backup/202MB + _website/52MB + src)
+# ZIP tải về /tmp → xoá ngay sau khi extract → tiết kiệm ~450MB storage
 download_server() {
     mkdir -p "$HUNR_DIR"
     if [ -f "$HUNR_DIR/$SERVER_JAR" ]; then
         echo -e "${GREEN}✓ Server JAR đã tồn tại, bỏ qua tải${NC}"; return 0
     fi
 
-    local ZIP="$HUNR_DIR/HUNR_Server.zip"
+    # Dùng /tmp để không chiếm storage lâu dài
+    local ZIP="/tmp/HUNR_Server.zip"
     echo -e "${CYAN}Đang tải HUNR_Server.zip (~1.1GB) từ Google Drive...${NC}"
+    echo -e "  ${YELLOW}Lưu ý:${NC} ZIP sẽ được xoá ngay sau khi extract"
+    echo -e "  Chỉ giữ lại file cần thiết (~820MB thực dùng)"
     echo "  (Có thể mất 10-30 phút tuỳ tốc độ mạng)"
+    echo ""
 
     local URL="https://drive.usercontent.google.com/download?id=${DRIVE_SERVER}&export=download&authuser=0&confirm=t"
     if [ -f "$ZIP" ]; then
@@ -75,22 +81,86 @@ download_server() {
     else
         curl -L -A "Mozilla/5.0" "$URL" -o "$ZIP" --progress-bar
     fi
+    echo ""
 
-    echo -e "\n${CYAN}Đang giải nén...${NC}"
-    unzip -q -o "$ZIP" -d "$HUNR_DIR/tmp_extract" || { echo -e "${RED}Giải nén thất bại!${NC}"; return 1; }
+    echo -e "${CYAN}Đang extract file cần thiết (bỏ qua backup/src/website)...${NC}"
+    # Dùng Python extract chọn lọc — bỏ backup(202MB) _website(52MB) src log
+    python3 << PYEOF
+import zipfile, os, shutil, sys
 
-    # Copy JAR
-    find "$HUNR_DIR/tmp_extract" -name "*.jar" -exec cp {} "$HUNR_DIR/$SERVER_JAR" \;
-    # Copy resources/ và Config/
-    find "$HUNR_DIR/tmp_extract" -name "resources" -type d -exec cp -r {} "$HUNR_DIR/" \; 2>/dev/null || true
-    find "$HUNR_DIR/tmp_extract" -name "Config" -type d -exec cp -r {} "$HUNR_DIR/" \; 2>/dev/null || true
-    # Copy sql/
-    find "$HUNR_DIR/tmp_extract" -name "sql" -type d -exec cp -r {} "$HUNR_DIR/" \; 2>/dev/null || true
-    # Copy _website nếu có
-    find "$HUNR_DIR/tmp_extract" -name "_website" -type d -exec cp -r {} "$HUNR_DIR/" \; 2>/dev/null || true
+zip_path = "$ZIP"
+out_dir  = "$HUNR_DIR"
+jar_dest = os.path.join(out_dir, "$SERVER_JAR")
 
-    rm -rf "$HUNR_DIR/tmp_extract"
-    echo -e "${GREEN}✓ Giải nén xong${NC}"
+# Tiền tố bỏ qua (chiếm ~255MB không cần thiết)
+SKIP = [
+    "Hunr2026/backup/",
+    "Hunr2026/_website/",
+    "Hunr2026/src/",
+    "Hunr2026/log/",
+    "Hunr2026/.mvn/",
+    "Hunr2026/replay_",
+    "Hunr2026/hs_err_",
+    "Hunr2026/LogThoiVang",
+    "Hunr2026/MultiLayerLog",
+    "Hunr2026/ConfigNRO.exe",
+    # Bỏ target/ trừ JAR
+    "Hunr2026/target/classes/",
+    "Hunr2026/target/maven-",
+    "Hunr2026/target/generated-",
+    "Hunr2026/target/surefire",
+    "Hunr2026/target/test-",
+]
+JAR_IN_ZIP = "Hunr2026/target/HunrProvision-0.0.1-SNAPSHOT.jar"
+
+total = extracted = skipped = 0
+try:
+    with zipfile.ZipFile(zip_path) as z:
+        entries = z.infolist()
+        total = len(entries)
+        for i, info in enumerate(entries):
+            fn = info.filename
+            if fn.endswith("/"):
+                continue
+
+            # Bỏ qua các thư mục không cần
+            if any(fn.startswith(s) or fn == s.rstrip("/") for s in SKIP):
+                skipped += info.compress_size
+                continue
+
+            # JAR → thẳng vào HUNR_DIR
+            if fn == JAR_IN_ZIP:
+                print(f"  Extracting JAR ({info.compress_size/1024/1024:.0f}MB compressed)...")
+                with z.open(info) as src, open(jar_dest, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                extracted += info.compress_size
+                continue
+
+            # resources/, Config/, data/, sql/, AddItem, BuyItem
+            rel = fn.replace("Hunr2026/", "", 1)
+            dest = os.path.join(out_dir, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with z.open(info) as src, open(dest, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            extracted += info.compress_size
+
+            if i % 200 == 0:
+                print(f"  [{i}/{total}] {extracted/1024/1024:.0f}MB extracted, {skipped/1024/1024:.0f}MB skipped")
+
+    print(f"\n  ✓ Xong! Extracted: {extracted/1024/1024:.0f}MB | Bỏ qua: {skipped/1024/1024:.0f}MB")
+except Exception as e:
+    print(f"Lỗi: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+
+    local py_exit=$?
+    # Xoá ZIP ngay sau khi extract xong
+    rm -f "$ZIP"
+    echo -e "  ${GREEN}✓ Đã xoá ZIP tạm (/tmp/HUNR_Server.zip)${NC}"
+
+    [ $py_exit -ne 0 ] && { echo -e "${RED}Extract thất bại!${NC}"; return 1; }
+    [ ! -f "$HUNR_DIR/$SERVER_JAR" ] && { echo -e "${RED}Không tìm thấy JAR sau extract!${NC}"; return 1; }
+    echo -e "${GREEN}✓ Extract hoàn tất${NC}"
 }
 
 # ─── Tạo application.properties ──────────────────────────────
