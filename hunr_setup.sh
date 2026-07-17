@@ -1,431 +1,460 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   Hồi Ức Ngọc Rồng – Termux Auto Setup                        ║
-# ║   Nguồn: Google Drive ZIP (Server Spring Boot + Resources)     ║
-# ║   Chạy: bash hunr_setup.sh                                     ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# ============================================================
+#  Hồi Ức Ngọc Rồng (HUNR) – Termux Auto Setup v2.0
+#  Repo: https://github.com/akah3674-glitch/rem4
+#  Hỗ trợ: chạy OFFLINE (local server + APK patch)
+# ============================================================
 
-R='\033[1;31m' G='\033[1;32m' Y='\033[1;33m'
-B='\033[1;34m' C='\033[1;36m' W='\033[1;37m' N='\033[0m'
-ok()  { echo -e "${G}[✓]${N} $*"; }
-err() { echo -e "${R}[✗]${N} $*"; }
-inf() { echo -e "${B}[i]${N} $*"; }
-wrn() { echo -e "${Y}[!]${N} $*"; }
-
-# ─── Config ───────────────────────────────────────────────────────
-HUNR_HOME="$HOME/hunr-server"
-GDRIVE_SERVER="1qQDKBYGRUxZma7Ax_8z1_v_s54_jAU09"
-GDRIVE_CLIENT="11W9nK8XA1209D1nzi2D7tGzxpM5X9a4t"
+HUNR_DIR="$HOME/hunr-server"
+SERVER_JAR="HunrProvision-0.0.1-SNAPSHOT.jar"
+DRIVE_SERVER="1qQDKBYGRUxZma7Ax_8z1_v_s54_jAU09"
 DB_NAME="hunr_2026"
-ZIP_TMP="/tmp/hunr_server.zip"
-SETUP_FLAG="$HUNR_HOME/.setup_done"
-JAR_NAME="HunrProvision-0.0.1-SNAPSHOT.jar"
+DB_USER="root"
+GAME_PORT=14445
+HTTP_PORT=1707
 
-banner() {
-  clear
-  echo -e "${C}"
-  echo "  ██╗  ██╗██╗   ██╗███╗   ██╗██████╗ "
-  echo "  ██║  ██║██║   ██║████╗  ██║██╔══██╗"
-  echo "  ███████║██║   ██║██╔██╗ ██║██████╔╝"
-  echo "  ██╔══██║██║   ██║██║╚██╗██║██╔══██╗"
-  echo "  ██║  ██║╚██████╔╝██║ ╚████║██║  ██║"
-  echo "  ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝"
-  echo -e "${Y}     Hồi Ức Ngọc Rồng – Private Server${N}"
-  echo -e "${G}  ════════════════════════════════════════${N}"
-  echo ""
+# APK patch constants (PHẢI khớp chính xác byte-for-byte)
+APK_OLD_URL="https://hoiucnro.com/server.txt"   # 31 bytes
+APK_NEW_URL="http://127.0.0.1:1707/lists.txt"   # 31 bytes ✓ exact match
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; NC='\033[0m'; BOLD='\033[1m'
+
+print_banner() {
+    echo -e "${CYAN}"
+    echo "╔══════════════════════════════════════════╗"
+    echo "║   🐉 Hồi Ức Ngọc Rồng – HUNR Server     ║"
+    echo "║   Termux Auto Setup v2.0 (Offline Mode)  ║"
+    echo "╚══════════════════════════════════════════╝"
+    echo -e "${NC}"
 }
 
-# ══════════════════════════════════════════════════════════════════
-# BƯỚC 1 – Cài Packages
-# ══════════════════════════════════════════════════════════════════
-step_packages() {
-  inf "Cập nhật pkg..."
-  pkg update -y 2>/dev/null | tail -1 || true
-
-  inf "Cài packages (openjdk-17, mariadb, unzip, curl, wget)..."
-  pkg install -y curl wget openjdk-17 mariadb unzip openssl python 2>&1 \
-    | grep "^Setting up" || true
-
-  ok "Packages xong!"
+print_menu() {
+    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "  ${GREEN}1.${NC} Setup lần đầu (tải + cài đặt hoàn toàn)"
+    echo -e "  ${GREEN}2.${NC} Khởi động server"
+    echo -e "  ${GREEN}3.${NC} Dừng server"
+    echo -e "  ${GREEN}4.${NC} Xem log server (live)"
+    echo -e "  ${GREEN}5.${NC} Vào MySQL shell"
+    echo -e "  ${GREEN}6.${NC} Thông tin server"
+    echo -e "  ${YELLOW}7.${NC} 📱 Patch APK → chạy offline (quan trọng!)"
+    echo -e "  ${GREEN}0.${NC} Thoát"
+    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
-# ══════════════════════════════════════════════════════════════════
-# BƯỚC 2 – Tải Server ZIP từ Google Drive
-# ══════════════════════════════════════════════════════════════════
-step_download_zip() {
-  local DRIVE_URL="https://drive.usercontent.google.com/download?id=${GDRIVE_SERVER}&export=download&authuser=0&confirm=t"
-
-  if [[ -f "$ZIP_TMP" ]]; then
-    local sz; sz=$(stat -c%s "$ZIP_TMP" 2>/dev/null || echo 0)
-    if [[ "$sz" -gt 1000000000 ]]; then
-      ok "ZIP đã có sẵn ($(du -h "$ZIP_TMP" | cut -f1)) – bỏ qua tải"
-      return 0
+# ─── Kiểm tra dependencies ───────────────────────────────────
+check_deps() {
+    local missing=()
+    for cmd in java mysqld unzip curl python3; do
+        command -v "$cmd" &>/dev/null || missing+=("$cmd")
+    done
+    if [ ${#missing[@]} -ne 0 ]; then
+        echo -e "${YELLOW}Thiếu: ${missing[*]}. Đang cài...${NC}"
+        pkg update -y -q
+        pkg install -y openjdk-17 mariadb unzip curl python3 2>/dev/null || true
     fi
-    wrn "ZIP chưa đầy đủ ($sz bytes) – tải lại..."
-    rm -f "$ZIP_TMP"
-  fi
-
-  inf "Tải HUNR_Server.zip từ Google Drive (~1.1GB)..."
-  curl -L -A "Mozilla/5.0" \
-    --retry 5 --retry-delay 10 \
-    --continue-at - \
-    --progress-bar \
-    "$DRIVE_URL" \
-    -o "$ZIP_TMP" || true
-
-  local sz; sz=$(stat -c%s "$ZIP_TMP" 2>/dev/null || echo 0)
-  if [[ "$sz" -lt 500000000 ]]; then
-    wrn "curl chưa đủ ($sz bytes), thử wget..."
-    wget -c --show-progress -q "$DRIVE_URL" -O "$ZIP_TMP" || true
-    sz=$(stat -c%s "$ZIP_TMP" 2>/dev/null || echo 0)
-  fi
-
-  if [[ "$sz" -lt 500000000 ]]; then
-    err "Tải thất bại! Kích thước: $sz bytes"
-    err "Thử tải thủ công và đặt vào: $ZIP_TMP"
-    return 1
-  fi
-
-  ok "Tải xong! Size: $(du -h "$ZIP_TMP" | cut -f1)"
+    # keytool + jarsigner (cần để ký APK)
+    command -v keytool &>/dev/null || { pkg install -y openjdk-17 -q 2>/dev/null; }
 }
 
-# ══════════════════════════════════════════════════════════════════
-# BƯỚC 3 – Giải nén và setup thư mục server
-# ══════════════════════════════════════════════════════════════════
-step_extract() {
-  local TMP_DIR="/tmp/hunr_src"
+# ─── Tải HUNR_Server.zip từ Google Drive ─────────────────────
+download_server() {
+    mkdir -p "$HUNR_DIR"
+    if [ -f "$HUNR_DIR/$SERVER_JAR" ]; then
+        echo -e "${GREEN}✓ Server JAR đã tồn tại, bỏ qua tải${NC}"; return 0
+    fi
 
-  if [[ -d "$HUNR_HOME" && -f "$HUNR_HOME/$JAR_NAME" ]]; then
-    ok "Server đã được extract trước đó – bỏ qua"
-    return 0
-  fi
+    local ZIP="$HUNR_DIR/HUNR_Server.zip"
+    echo -e "${CYAN}Đang tải HUNR_Server.zip (~1.1GB) từ Google Drive...${NC}"
+    echo "  (Có thể mất 10-30 phút tuỳ tốc độ mạng)"
 
-  inf "Giải nén HUNR_Server.zip..."
-  rm -rf "$TMP_DIR"
-  mkdir -p "$TMP_DIR"
-  unzip -q "$ZIP_TMP" -d "$TMP_DIR" 2>/dev/null || {
-    err "Giải nén thất bại!"
-    return 1
-  }
+    local URL="https://drive.usercontent.google.com/download?id=${DRIVE_SERVER}&export=download&authuser=0&confirm=t"
+    if [ -f "$ZIP" ]; then
+        echo "  Tiếp tục tải (resume)..."
+        curl -L -A "Mozilla/5.0" -C - "$URL" -o "$ZIP" --progress-bar
+    else
+        curl -L -A "Mozilla/5.0" "$URL" -o "$ZIP" --progress-bar
+    fi
 
-  # Tìm thư mục Hunr2026
-  local SRC
-  SRC=$(find "$TMP_DIR" -maxdepth 2 -name "HunrProvision-0.0.1-SNAPSHOT.jar" | head -1)
-  if [[ -z "$SRC" ]]; then
-    err "Không tìm thấy JAR trong ZIP!"
-    ls -la "$TMP_DIR"
-    return 1
-  fi
-  local SRC_DIR; SRC_DIR=$(dirname "$(dirname "$SRC")")
+    echo -e "\n${CYAN}Đang giải nén...${NC}"
+    unzip -q -o "$ZIP" -d "$HUNR_DIR/tmp_extract" || { echo -e "${RED}Giải nén thất bại!${NC}"; return 1; }
 
-  inf "Copying server files to $HUNR_HOME ..."
-  mkdir -p "$HUNR_HOME"
-  # Copy JAR
-  cp "$SRC" "$HUNR_HOME/$JAR_NAME"
-  # Copy thư mục resources và Config (cần thiết khi chạy)
-  [[ -d "$SRC_DIR/resources" ]] && cp -r "$SRC_DIR/resources" "$HUNR_HOME/"
-  [[ -d "$SRC_DIR/Config" ]]    && cp -r "$SRC_DIR/Config"    "$HUNR_HOME/"
-  [[ -d "$SRC_DIR/data" ]]      && cp -r "$SRC_DIR/data"      "$HUNR_HOME/"
-  [[ -d "$SRC_DIR/sql" ]]       && cp -r "$SRC_DIR/sql"       "$HUNR_HOME/"
-  mkdir -p "$HUNR_HOME/logs"
+    # Copy JAR
+    find "$HUNR_DIR/tmp_extract" -name "*.jar" -exec cp {} "$HUNR_DIR/$SERVER_JAR" \;
+    # Copy resources/ và Config/
+    find "$HUNR_DIR/tmp_extract" -name "resources" -type d -exec cp -r {} "$HUNR_DIR/" \; 2>/dev/null || true
+    find "$HUNR_DIR/tmp_extract" -name "Config" -type d -exec cp -r {} "$HUNR_DIR/" \; 2>/dev/null || true
+    # Copy sql/
+    find "$HUNR_DIR/tmp_extract" -name "sql" -type d -exec cp -r {} "$HUNR_DIR/" \; 2>/dev/null || true
+    # Copy _website nếu có
+    find "$HUNR_DIR/tmp_extract" -name "_website" -type d -exec cp -r {} "$HUNR_DIR/" \; 2>/dev/null || true
 
-  ok "Extract xong! JAR: $HUNR_HOME/$JAR_NAME ($(du -h "$HUNR_HOME/$JAR_NAME" | cut -f1))"
-  # Dọn tmp
-  rm -rf "$TMP_DIR"
+    rm -rf "$HUNR_DIR/tmp_extract"
+    echo -e "${GREEN}✓ Giải nén xong${NC}"
 }
 
-# ══════════════════════════════════════════════════════════════════
-# BƯỚC 4 – Cấu hình application.properties
-# ══════════════════════════════════════════════════════════════════
-step_config() {
-  local PROPS="$HUNR_HOME/application.properties"
-
-  inf "Tạo application.properties..."
-  cat > "$PROPS" << 'EOF'
-############################################################
-# SERVER / GAME SETTINGS
-############################################################
-server.id=1
-server.name=HUNR Local
-server.port_game=14445
-server.host=127.0.0.1
-server.redirect=false
-server.autosave.delay=300000
-game.data.version=1
-game.item.version=1
-game.map.version=4
-game.skill.version=1
-game.servers=Local:127.0.0.1:14445:0,0,0
-game.exp=5
-game.item.quantity.max=1000000
-game.log_ccu=1
-game.bot_token=
-game.chat_id=0
-############################################################
-# DATABASE
-############################################################
-database.port=3306
-database.host=localhost
-database.name=hunr_2026
-database.user=root
-database.password=
-spring.datasource.url=jdbc:mysql://localhost:3306/hunr_2026?useUnicode=true&characterEncoding=utf8&rewriteBatchedStatements=true&serverTimezone=Asia/Bangkok
-spring.datasource.username=root
+# ─── Tạo application.properties ──────────────────────────────
+create_config() {
+    cat > "$HUNR_DIR/application.properties" << EOF
+# HUNR Server – Local Config (auto-generated by hunr_setup.sh)
+spring.datasource.url=jdbc:mysql://localhost:3306/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+spring.datasource.username=${DB_USER}
 spring.datasource.password=
-spring.datasource.hikari.pool-name=GamePool
-spring.datasource.hikari.maximum-pool-size=32
-spring.datasource.hikari.minimum-idle=8
-spring.datasource.hikari.connection-timeout=30000
-spring.datasource.hikari.idle-timeout=600000
-spring.datasource.hikari.max-lifetime=1800000
-############################################################
-# SPRING BOOT PORT (admin/API)
-############################################################
-server.port=1707
-############################################################
-# JPA / HIBERNATE
-############################################################
-spring.jpa.show-sql=false
-spring.jpa.open-in-view=false
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+
 spring.jpa.hibernate.ddl-auto=update
-spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
-spring.jpa.properties.hibernate.jdbc.batch_size=50
-spring.jpa.properties.hibernate.order_inserts=true
-spring.jpa.properties.hibernate.order_updates=true
-############################################################
-# SPRING SECURITY
-############################################################
-spring.security.user.name=admin
-spring.security.user.password=hunr2026
-############################################################
-# ACTUATOR & LOGGING
-############################################################
-management.endpoints.web.exposure.include=health,metrics
-management.endpoint.health.show-details=never
-logging.level.com.zaxxer.hikari=INFO
-logging.level.org.hibernate.SQL=ERROR
-EOF
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL5InnoDBDialect
 
-  ok "application.properties đã tạo"
+server.port=${HTTP_PORT}
+game.port=${GAME_PORT}
+
+# Static resources – phục vụ /lists.txt cho APK offline
+spring.web.resources.static-locations=file:${HUNR_DIR}/static/,classpath:/static/
+
+logging.level.root=WARN
+logging.level.com.ngocrong=INFO
+logging.file.name=${HUNR_DIR}/logs/server.log
+EOF
+    echo -e "${GREEN}✓ Đã tạo application.properties${NC}"
 }
 
-# ══════════════════════════════════════════════════════════════════
-# BƯỚC 5 – Setup MariaDB
-# ══════════════════════════════════════════════════════════════════
-step_mariadb() {
-  inf "Khởi động MariaDB..."
-  mkdir -p "$PREFIX/var/lib/mysql"
+# ─── Tạo static/lists.txt (server list cho APK offline) ──────
+create_static_files() {
+    mkdir -p "$HUNR_DIR/static"
+    cat > "$HUNR_DIR/static/lists.txt" << 'EOF'
+Local:127.0.0.1:14445:0,0,0
+EOF
+    echo -e "${GREEN}✓ Đã tạo static/lists.txt (server list cho APK offline)${NC}"
+}
 
-  # Init nếu chưa có
-  if [[ ! -d "$PREFIX/var/lib/mysql/mysql" ]]; then
-    inf "Khởi tạo MariaDB lần đầu..."
-    mysql_install_db --datadir="$PREFIX/var/lib/mysql" 2>/dev/null | tail -3 || true
-  fi
+# ─── Khởi tạo MySQL ──────────────────────────────────────────
+setup_mysql() {
+    echo -e "${CYAN}Khởi tạo MariaDB...${NC}"
+    mysqld --initialize-insecure --user="$USER" 2>/dev/null || true
+    mysqld_safe --user="$USER" &>/dev/null &
+    sleep 5
 
-  # Start MariaDB
-  mysqld_safe --datadir="$PREFIX/var/lib/mysql" \
-    --socket="$PREFIX/tmp/mysql.sock" \
-    --port=3306 \
-    --user="$(whoami)" \
-    --skip-networking=false \
-    --bind-address=127.0.0.1 \
-    --log-error="$HOME/mariadb.log" &
-  local MARIA_PID=$!
+    mysql -u root --connect-timeout=10 -e "
+        CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO 'root'@'localhost';
+        FLUSH PRIVILEGES;
+    " 2>/dev/null && echo -e "${GREEN}✓ Database '${DB_NAME}' đã sẵn sàng${NC}" || \
+        echo -e "${YELLOW}⚠ Không thể kết nối MySQL (có thể đã chạy)${NC}"
 
-  inf "Chờ MariaDB khởi động (15s)..."
-  sleep 15
-
-  # Kiểm tra MariaDB
-  local TRIES=0
-  while ! mysql -u root --socket="$PREFIX/tmp/mysql.sock" -e "SELECT 1" &>/dev/null; do
-    sleep 3
-    TRIES=$((TRIES+1))
-    if [[ $TRIES -ge 10 ]]; then
-      err "MariaDB không khởi động được! Xem log: $HOME/mariadb.log"
-      return 1
+    # Chạy SQL bổ sung nếu có
+    if ls "$HUNR_DIR/sql/"*.sql &>/dev/null; then
+        for f in "$HUNR_DIR/sql/"*.sql; do
+            echo "  Đang chạy $f..."
+            mysql -u root "$DB_NAME" < "$f" 2>/dev/null || true
+        done
+        echo -e "${GREEN}✓ SQL setup xong${NC}"
     fi
-  done
-  ok "MariaDB đã chạy!"
-
-  # Tạo database
-  inf "Tạo database $DB_NAME ..."
-  mysql -u root --socket="$PREFIX/tmp/mysql.sock" << EOF
-CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO 'root'@'localhost';
-FLUSH PRIVILEGES;
-EOF
-  ok "Database $DB_NAME đã tạo!"
-
-  # Import SQL phụ nếu có
-  if [[ -f "$HUNR_HOME/sql/bo_mong_setup.sql" ]]; then
-    inf "Import bo_mong_setup.sql..."
-    mysql -u root --socket="$PREFIX/tmp/mysql.sock" "$DB_NAME" < "$HUNR_HOME/sql/bo_mong_setup.sql" 2>/dev/null || true
-    ok "Import SQL phụ xong"
-  fi
 }
 
-# ══════════════════════════════════════════════════════════════════
-# BƯỚC 6 – Tạo start/stop scripts
-# ══════════════════════════════════════════════════════════════════
-step_scripts() {
-  # start.sh
-  cat > "$HUNR_HOME/start.sh" << SCRIPT
+# ─── Tạo start.sh / stop.sh ──────────────────────────────────
+create_scripts() {
+    cat > "$HUNR_DIR/start.sh" << STARTEOF
 #!/data/data/com.termux/files/usr/bin/bash
-cd "$HUNR_HOME"
-echo "[*] Đảm bảo MariaDB đang chạy..."
-if ! mysql -u root --socket="\$PREFIX/tmp/mysql.sock" -e "SELECT 1" &>/dev/null 2>&1; then
-  mysqld_safe --datadir="\$PREFIX/var/lib/mysql" \\
-    --socket="\$PREFIX/tmp/mysql.sock" --port=3306 \\
-    --skip-networking=false --bind-address=127.0.0.1 \\
-    --log-error="\$HOME/mariadb.log" &
-  sleep 10
-fi
-echo "[*] Khởi động HUNR Game Server (port 14445)..."
-java -Xms512m -Xmx2g \\
-  -Dfile.encoding=UTF-8 \\
-  -Dspring.config.location="$HUNR_HOME/application.properties" \\
-  -jar "$HUNR_HOME/$JAR_NAME" 2>&1 | tee -a "$HUNR_HOME/logs/server.log"
-SCRIPT
+cd "$HUNR_DIR"
+mkdir -p logs
 
-  # stop.sh
-  cat > "$HUNR_HOME/stop.sh" << 'SCRIPT'
+# Bắt đầu MySQL nếu chưa chạy
+mysql -u root -e "SELECT 1" &>/dev/null || {
+    mysqld_safe --user="\$USER" &>/dev/null &
+    sleep 4
+}
+
+# Bắt đầu server HUNR
+nohup java -jar "$HUNR_DIR/$SERVER_JAR" \\
+    --spring.config.location=file:"$HUNR_DIR/application.properties" \\
+    > "$HUNR_DIR/logs/server.log" 2>&1 &
+
+echo \$! > "$HUNR_DIR/server.pid"
+echo "🐉 HUNR Server đã khởi động! PID=\$(cat "$HUNR_DIR/server.pid")"
+echo "   Game port : ${GAME_PORT}"
+echo "   HTTP port : ${HTTP_PORT}"
+echo "   Server list: http://127.0.0.1:${HTTP_PORT}/lists.txt"
+echo "   Log: tail -f $HUNR_DIR/logs/server.log"
+STARTEOF
+
+    cat > "$HUNR_DIR/stop.sh" << STOPEOF
 #!/data/data/com.termux/files/usr/bin/bash
-echo "[*] Dừng HUNR server..."
-pkill -f "HunrProvision" || true
-sleep 2
-echo "[*] Dừng MariaDB..."
-mysqladmin -u root --socket="$PREFIX/tmp/mysql.sock" shutdown 2>/dev/null || pkill mysqld || true
-echo "[✓] Đã dừng tất cả"
-SCRIPT
-
-  chmod +x "$HUNR_HOME/start.sh" "$HUNR_HOME/stop.sh"
-  ok "start.sh và stop.sh đã tạo"
-}
-
-# ══════════════════════════════════════════════════════════════════
-# MENU CHÍNH
-# ══════════════════════════════════════════════════════════════════
-menu() {
-  banner
-  echo -e "  ${W}1.${N} Setup lần đầu (tải + cài đặt hoàn toàn)"
-  echo -e "  ${W}2.${N} Khởi động server"
-  echo -e "  ${W}3.${N} Dừng server"
-  echo -e "  ${W}4.${N} Xem log server"
-  echo -e "  ${W}5.${N} Vào MySQL shell"
-  echo -e "  ${W}6.${N} Thông tin server"
-  echo -e "  ${W}0.${N} Thoát"
-  echo ""
-  echo -ne "  ${C}Chọn [0-6]:${N} "
-  read -r choice
-
-  case "$choice" in
-    1) do_setup ;;
-    2) do_start ;;
-    3) do_stop ;;
-    4) do_log ;;
-    5) do_mysql ;;
-    6) do_info ;;
-    0) exit 0 ;;
-    *) echo -e "${R}Lựa chọn không hợp lệ!${N}"; sleep 1; menu ;;
-  esac
-}
-
-do_setup() {
-  banner
-  echo -e "${Y}=== BẮT ĐẦU SETUP HUNR SERVER ===${N}"
-  echo ""
-  step_packages
-  echo ""
-  step_download_zip || { err "Tải thất bại!"; read -r; menu; return; }
-  echo ""
-  step_extract || { err "Extract thất bại!"; read -r; menu; return; }
-  echo ""
-  step_config
-  echo ""
-  step_mariadb || { err "MariaDB thất bại!"; read -r; menu; return; }
-  echo ""
-  step_scripts
-  echo ""
-  touch "$SETUP_FLAG"
-  echo -e "${G}════════════════════════════════════════${N}"
-  echo -e "${G}[✓] SETUP HOÀN TẤT!${N}"
-  echo -e "${Y}Game port:  14445${N}"
-  echo -e "${Y}Admin port: 1707${N}"
-  echo -e "${Y}Database:   $DB_NAME${N}"
-  echo -e "${G}════════════════════════════════════════${N}"
-  echo ""
-  echo -ne "Khởi động server ngay? [y/n]: "
-  read -r ans
-  [[ "$ans" == "y" || "$ans" == "Y" ]] && do_start
-  menu
-}
-
-do_start() {
-  banner
-  if [[ ! -f "$HUNR_HOME/$JAR_NAME" ]]; then
-    err "Server chưa được setup! Chọn Menu 1 trước."
-    sleep 2; menu; return
-  fi
-  inf "Khởi động HUNR Server..."
-  bash "$HUNR_HOME/start.sh"
-}
-
-do_stop() {
-  bash "$HUNR_HOME/stop.sh"
-  echo ""
-  read -rp "Nhấn Enter để về menu..." _
-  menu
-}
-
-do_log() {
-  local LOG="$HUNR_HOME/logs/server.log"
-  if [[ -f "$LOG" ]]; then
-    tail -50 "$LOG"
-  else
-    err "Chưa có log! Server chưa được khởi động."
-  fi
-  echo ""
-  read -rp "Nhấn Enter để về menu..." _
-  menu
-}
-
-do_mysql() {
-  inf "Mở MySQL shell (database: $DB_NAME)..."
-  mysql -u root --socket="$PREFIX/tmp/mysql.sock" "$DB_NAME"
-  menu
-}
-
-do_info() {
-  banner
-  echo -e "${C}=== THÔNG TIN SERVER ===${N}"
-  echo -e "${W}Home:${N}       $HUNR_HOME"
-  echo -e "${W}JAR:${N}        $JAR_NAME"
-  echo -e "${W}Game port:${N}  14445"
-  echo -e "${W}Admin port:${N} 1707"
-  echo -e "${W}Database:${N}   $DB_NAME"
-  echo -e "${W}Log:${N}        $HUNR_HOME/logs/server.log"
-  echo ""
-  # Check status
-  if pgrep -f "HunrProvision" > /dev/null; then
-    echo -e "${G}[✓] Server đang chạy${N}"
-  else
-    echo -e "${R}[✗] Server đang dừng${N}"
-  fi
-  if mysql -u root --socket="$PREFIX/tmp/mysql.sock" -e "SELECT 1" &>/dev/null 2>&1; then
-    echo -e "${G}[✓] MariaDB đang chạy${N}"
-  else
-    echo -e "${R}[✗] MariaDB đang dừng${N}"
-  fi
-  echo ""
-  read -rp "Nhấn Enter để về menu..." _
-  menu
-}
-
-# ── Entry point ─────────────────────────────────────────────────
-if [[ -f "$SETUP_FLAG" ]]; then
-  menu
+if [ -f "$HUNR_DIR/server.pid" ]; then
+    PID=\$(cat "$HUNR_DIR/server.pid")
+    kill "\$PID" 2>/dev/null && echo "✓ Server (PID \$PID) đã dừng" || echo "Server không chạy"
+    rm -f "$HUNR_DIR/server.pid"
 else
-  echo -e "${Y}Phát hiện lần chạy đầu tiên – bắt đầu setup...${N}"
-  sleep 1
-  do_setup
+    pkill -f "$SERVER_JAR" 2>/dev/null && echo "✓ Server đã dừng" || echo "Server không chạy"
 fi
+STOPEOF
+
+    chmod +x "$HUNR_DIR/start.sh" "$HUNR_DIR/stop.sh"
+    echo -e "${GREEN}✓ Đã tạo start.sh, stop.sh${NC}"
+}
+
+# ─── SETUP LẦN ĐẦU ───────────────────────────────────────────
+do_setup() {
+    echo -e "\n${BOLD}=== SETUP HUNR SERVER ===${NC}\n"
+    check_deps
+    download_server
+    create_config
+    create_static_files
+    setup_mysql
+    create_scripts
+
+    echo -e "\n${GREEN}${BOLD}✅ SETUP HOÀN TẤT!${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e " Chạy server: ${BOLD}bash $HUNR_DIR/start.sh${NC}"
+    echo -e " Patch APK  : ${BOLD}Chọn Menu 7${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+}
+
+# ─── PATCH APK ───────────────────────────────────────────────
+# Thay "https://hoiucnro.com/server.txt" (31 bytes)
+# thành "http://127.0.0.1:1707/lists.txt" (31 bytes)
+# trong global-metadata.dat của APK Android
+# ──────────────────────────────────────────────────────────────
+do_patch_apk() {
+    echo -e "\n${BOLD}=== PATCH APK – HUNR OFFLINE MODE ===${NC}\n"
+    echo -e "${CYAN}Mục đích:${NC}"
+    echo "  APK gốc fetch server list từ https://hoiucnro.com/server.txt"
+    echo "  Sau patch → fetch từ http://127.0.0.1:1707/lists.txt (local server)"
+    echo "  Local server trả về: Local:127.0.0.1:14445:0,0,0"
+    echo "  → Game kết nối đến server Termux của bạn!"
+    echo ""
+
+    # Tìm APK
+    local APK_IN=""
+    echo -e "${YELLOW}Tìm APK HUNR trong thiết bị...${NC}"
+
+    # Auto-search thư mục phổ biến
+    for search_dir in \
+        "$HOME/storage/downloads" \
+        "$HOME/storage/shared/Download" \
+        "$HOME/Downloads" \
+        "/sdcard/Download" \
+        "/sdcard/Downloads" \
+        "$HOME"; do
+        if [ -d "$search_dir" ]; then
+            local found
+            found=$(find "$search_dir" -maxdepth 3 -name "*.apk" -iname "*hunr*" -o \
+                    -name "*.apk" -iname "*hoiuc*" -o \
+                    -name "*.apk" -iname "*ngocrong*" 2>/dev/null | head -5)
+            if [ -n "$found" ]; then
+                echo -e "${GREEN}Tìm thấy APK:${NC}"
+                echo "$found" | nl
+                APK_IN=$(echo "$found" | head -1)
+                break
+            fi
+        fi
+    done
+
+    if [ -z "$APK_IN" ]; then
+        echo -e "${YELLOW}Không tìm thấy APK tự động.${NC}"
+        echo "Nhập đường dẫn APK gốc HUNR (hoặc Enter để bỏ qua):"
+        read -r APK_IN
+        [ -z "$APK_IN" ] && { echo "Bỏ qua."; return; }
+    else
+        echo -e "Dùng: ${BOLD}$APK_IN${NC}"
+        echo "Nhấn Enter để xác nhận, hoặc nhập đường dẫn khác:"
+        read -r alt_path
+        [ -n "$alt_path" ] && APK_IN="$alt_path"
+    fi
+
+    [ ! -f "$APK_IN" ] && { echo -e "${RED}File không tồn tại: $APK_IN${NC}"; return 1; }
+
+    local APK_OUT="$HUNR_DIR/HUNR-offline.apk"
+    local WORK_DIR="/tmp/hunr_apk_work"
+
+    echo -e "\n${CYAN}Bước 1: Giải nén APK...${NC}"
+    rm -rf "$WORK_DIR"
+    mkdir -p "$WORK_DIR"
+    unzip -q "$APK_IN" -d "$WORK_DIR" || { echo -e "${RED}Lỗi giải nén APK!${NC}"; return 1; }
+
+    # Tìm global-metadata.dat
+    local METADATA
+    METADATA=$(find "$WORK_DIR" -name "global-metadata.dat" 2>/dev/null | head -1)
+    if [ -z "$METADATA" ]; then
+        echo -e "${RED}Không tìm thấy global-metadata.dat trong APK!${NC}"
+        echo "  APK này có thể không phải IL2CPP build."
+        rm -rf "$WORK_DIR"; return 1
+    fi
+    echo -e "  ${GREEN}✓ Tìm thấy: ${METADATA/$WORK_DIR\//}${NC}"
+
+    echo -e "\n${CYAN}Bước 2: Patch binary (thay URL server list)...${NC}"
+    python3 << PYEOF
+import sys
+
+metadata_path = "$METADATA"
+old_url = b'https://hoiucnro.com/server.txt'   # 31 bytes
+new_url = b'http://127.0.0.1:1707/lists.txt'   # 31 bytes – exact match
+
+with open(metadata_path, 'rb') as f:
+    data = f.read()
+
+count = data.count(old_url)
+if count == 0:
+    print(f"  ⚠ Không tìm thấy URL trong metadata!")
+    print(f"    Tìm kiếm: {old_url.decode()}")
+    print(f"    APK này có thể đã patch, hoặc dùng URL khác.")
+    # Thử tìm biến thể
+    for alt in [b'hoiucnro.com', b'server.txt', b'hoiuc']:
+        pos = data.find(alt)
+        if pos != -1:
+            ctx = data[max(0,pos-10):pos+40]
+            print(f"    Tìm thấy '{alt.decode()}' tại 0x{pos:08x}: {ctx}")
+    sys.exit(1)
+
+print(f"  Tìm thấy {count} chỗ cần patch")
+patched = data.replace(old_url, new_url)
+
+with open(metadata_path, 'wb') as f:
+    f.write(patched)
+
+# Verify
+with open(metadata_path, 'rb') as f:
+    verify = f.read()
+if new_url in verify and old_url not in verify:
+    print(f"  ✓ Patch thành công!")
+    print(f"    Old: {old_url.decode()}")
+    print(f"    New: {new_url.decode()}")
+else:
+    print("  ✗ Verify thất bại!")
+    sys.exit(1)
+PYEOF
+
+    [ $? -ne 0 ] && { rm -rf "$WORK_DIR"; return 1; }
+
+    echo -e "\n${CYAN}Bước 3: Đóng gói lại APK...${NC}"
+    cd "$WORK_DIR"
+    zip -q -r "$APK_OUT.unsigned" . -x "META-INF/*"
+    echo -e "  ${GREEN}✓ Đã đóng gói${NC}"
+
+    echo -e "\n${CYAN}Bước 4: Ký APK...${NC}"
+    local KEYSTORE="$HUNR_DIR/hunr-debug.keystore"
+    if [ ! -f "$KEYSTORE" ]; then
+        keytool -genkey -v -keystore "$KEYSTORE" \
+            -alias hunr_offline -keyalg RSA -keysize 2048 -validity 36500 \
+            -dname "CN=HUNR-Offline,O=Termux,C=VN" \
+            -storepass hunr2026 -keypass hunr2026 2>/dev/null
+        echo -e "  ${GREEN}✓ Tạo keystore mới${NC}"
+    fi
+
+    jarsigner -keystore "$KEYSTORE" \
+        -storepass hunr2026 -keypass hunr2026 \
+        -sigalg SHA256withRSA -digestalg SHA-256 \
+        -verbose:summary \
+        "$APK_OUT.unsigned" hunr_offline 2>&1 | tail -3
+
+    mv "$APK_OUT.unsigned" "$APK_OUT"
+    rm -rf "$WORK_DIR"
+
+    echo -e "\n${GREEN}${BOLD}✅ PATCH APK HOÀN TẤT!${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e " APK offline: ${BOLD}$APK_OUT${NC}"
+    echo -e " File size  : $(du -sh "$APK_OUT" 2>/dev/null | cut -f1)"
+    echo -e ""
+    echo -e " ${YELLOW}CÁCH CÀI:${NC}"
+    echo -e " 1. Copy APK về máy: adb pull $APK_OUT"
+    echo -e "    Hoặc: cp $APK_OUT /sdcard/Download/"
+    echo -e " 2. Cài APK trên điện thoại (bật Unknown Sources)"
+    echo -e " 3. Khởi động HUNR server: bash $HUNR_DIR/start.sh"
+    echo -e " 4. Mở game → chọn server 'Local' → chơi offline!"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e ""
+    echo -e " ${YELLOW}LƯU Ý:${NC} Server phải ĐANG CHẠY khi mở game"
+    echo -e " Kết nối: APK → 127.0.0.1:1707/lists.txt → server list → 127.0.0.1:14445"
+}
+
+# ─── MENU ACTIONS ────────────────────────────────────────────
+start_server() {
+    if [ ! -f "$HUNR_DIR/$SERVER_JAR" ]; then
+        echo -e "${RED}Server chưa được setup! Chạy Menu 1 trước.${NC}"; return 1
+    fi
+    # Đảm bảo MySQL chạy
+    mysql -u root --connect-timeout=3 -e "SELECT 1" &>/dev/null || {
+        echo -e "${YELLOW}Đang khởi động MySQL...${NC}"
+        mysqld_safe --user="$USER" &>/dev/null &
+        sleep 4
+    }
+    mkdir -p "$HUNR_DIR/logs"
+    nohup java -jar "$HUNR_DIR/$SERVER_JAR" \
+        --spring.config.location=file:"$HUNR_DIR/application.properties" \
+        > "$HUNR_DIR/logs/server.log" 2>&1 &
+    echo $! > "$HUNR_DIR/server.pid"
+    sleep 2
+    if kill -0 "$(cat "$HUNR_DIR/server.pid" 2>/dev/null)" 2>/dev/null; then
+        echo -e "${GREEN}✓ HUNR Server đang chạy (PID=$(cat "$HUNR_DIR/server.pid"))${NC}"
+        echo -e "  Game port   : ${BOLD}$GAME_PORT${NC}"
+        echo -e "  HTTP port   : ${BOLD}$HTTP_PORT${NC}"
+        echo -e "  Server list : ${BOLD}http://127.0.0.1:$HTTP_PORT/lists.txt${NC}"
+    else
+        echo -e "${RED}Server khởi động thất bại! Xem log:${NC}"
+        tail -20 "$HUNR_DIR/logs/server.log" 2>/dev/null
+    fi
+}
+
+stop_server() {
+    local PID_FILE="$HUNR_DIR/server.pid"
+    if [ -f "$PID_FILE" ]; then
+        local PID; PID=$(cat "$PID_FILE")
+        kill "$PID" 2>/dev/null && echo -e "${GREEN}✓ Server (PID $PID) đã dừng${NC}" || echo "Server không chạy"
+        rm -f "$PID_FILE"
+    else
+        pkill -f "$SERVER_JAR" 2>/dev/null && echo -e "${GREEN}✓ Server đã dừng${NC}" || echo "Server không chạy"
+    fi
+}
+
+show_log() {
+    local LOG="$HUNR_DIR/logs/server.log"
+    [ ! -f "$LOG" ] && { echo "Chưa có log."; return; }
+    echo -e "${CYAN}Xem log (Ctrl+C để thoát):${NC}"
+    tail -f "$LOG"
+}
+
+show_info() {
+    echo -e "\n${CYAN}${BOLD}=== THÔNG TIN HUNR SERVER ===${NC}"
+    echo -e " JAR    : $HUNR_DIR/$SERVER_JAR"
+    echo -e " Config : $HUNR_DIR/application.properties"
+    echo -e " DB     : $DB_NAME (MySQL root)"
+    echo -e " Cổng game  : $GAME_PORT"
+    echo -e " Cổng HTTP  : $HTTP_PORT"
+    echo -e " Server list: http://127.0.0.1:$HTTP_PORT/lists.txt"
+    echo -e " APK offline: $HUNR_DIR/HUNR-offline.apk"
+    echo ""
+    # Status
+    if [ -f "$HUNR_DIR/server.pid" ] && kill -0 "$(cat "$HUNR_DIR/server.pid" 2>/dev/null)" 2>/dev/null; then
+        echo -e " Trạng thái: ${GREEN}● ĐANG CHẠY${NC} (PID=$(cat "$HUNR_DIR/server.pid"))"
+    else
+        echo -e " Trạng thái: ${RED}● KHÔNG CHẠY${NC}"
+    fi
+    # DB status
+    mysql -u root --connect-timeout=3 -e "USE $DB_NAME; SHOW TABLES;" 2>/dev/null | head -5 && \
+        echo -e " Database  : ${GREEN}● ONLINE${NC}" || \
+        echo -e " Database  : ${RED}● OFFLINE${NC}"
+    echo ""
+}
+
+# ─── MAIN LOOP ───────────────────────────────────────────────
+main() {
+    print_banner
+    while true; do
+        print_menu
+        echo -n "Chọn [0-7]: "
+        read -r choice
+        case "$choice" in
+            1) do_setup ;;
+            2) start_server ;;
+            3) stop_server ;;
+            4) show_log ;;
+            5) mysql -u root "$DB_NAME" 2>/dev/null || mysql -u root 2>/dev/null ;;
+            6) show_info ;;
+            7) do_patch_apk ;;
+            0) echo -e "${GREEN}Thoát. Chúc chơi vui!${NC}"; exit 0 ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}" ;;
+        esac
+        echo ""
+    done
+}
+
+main "$@"
