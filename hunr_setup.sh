@@ -437,6 +437,8 @@ show_info() {
 
 # ─── MAIN LOOP ───────────────────────────────────────────────
 main() {
+    # Fix curl|bash: stdin bị pipe chiếm, read từ /dev/tty
+    exec < /dev/tty
     print_banner
     while true; do
         print_menu
